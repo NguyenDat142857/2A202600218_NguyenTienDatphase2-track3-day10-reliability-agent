@@ -7,63 +7,216 @@
 | Student Name | Nguyen Tien Dat |
 | Student ID | 2A202600218 |
 | Repository | 2A202600218_NguyenTienDatphase2-track3-day10-reliability-agent-main |
+| Subject | Reliability Engineering for Production Agents |
+| Lab | Day 10 Reliability Agent |
+| Environment | Python + Redis + Docker |
+| Operating System | Windows 11 |
+| IDE | VSCode |
 
 ---
 
 # 1. Architecture Summary
 
-The reliability gateway first checks the cache before routing requests through provider-specific circuit breakers. If the primary provider fails or its circuit is open, traffic automatically falls back to the backup provider. If all providers fail, the system returns a static fallback response.
+This project implements a production-style reliability layer for an LLM gateway system.  
+The system improves reliability through:
+
+- Circuit breaker protection
+- Automatic fallback routing
+- Cache optimization
+- Redis shared cache
+- Chaos testing
+- Metrics collection
+
+The gateway first checks whether a cached response exists.  
+If there is no cache hit, the request is routed through provider-specific circuit breakers.
+
+If the primary provider fails or becomes unstable, the system automatically routes traffic to the backup provider.  
+If all providers fail, the gateway returns a static fallback response instead of crashing.
+
+This design improves:
+
+- Availability
+- Fault tolerance
+- Recovery behavior
+- Cost optimization
+- Response latency
+
+---
+
+## Architecture Flow
 
 ```text
-User
-  |
-  v
-Gateway
-  |
-  +--> Cache Check
-  |       |
-  |       +--> Cache Hit
-  |
-  +--> Circuit Breaker (Primary)
-  |       |
-  |       +--> Primary Provider
-  |
-  +--> Circuit Breaker (Backup)
-  |       |
-  |       +--> Backup Provider
-  |
-  +--> Static Fallback
+                    +-------------------+
+                    |       User        |
+                    +---------+---------+
+                              |
+                              v
+                    +-------------------+
+                    |      Gateway      |
+                    +---------+---------+
+                              |
+                    +---------+---------+
+                    |   Cache Check     |
+                    +---------+---------+
+                              |
+                +-------------+-------------+
+                |                           |
+                v                           v
+        Cache Hit                    Cache Miss
+                |                           |
+                v                           v
+      Cached Response           Circuit Breaker Layer
+                                            |
+                    +-----------------------+-----------------------+
+                    |                                               |
+                    v                                               v
+          Primary Provider                               Backup Provider
+                    |                                               |
+             Success / Fail                                 Success / Fail
+                    |                                               |
+                    +-----------------------+-----------------------+
+                                            |
+                                            v
+                                   Static Fallback
 ```
 
 ---
 
-# 2. Configuration
+# 2. Reliability Features
+
+## 2.1 Circuit Breaker
+
+The circuit breaker protects the system from continuously sending requests to failing providers.
+
+Three states were implemented:
+
+| State | Description |
+|---|---|
+| CLOSED | Normal operation, requests allowed |
+| OPEN | Provider considered unhealthy, requests blocked |
+| HALF_OPEN | Recovery probe state |
+
+### Circuit Breaker Behavior
+
+- Failures are counted while the circuit is CLOSED
+- After reaching the failure threshold, the circuit transitions to OPEN
+- OPEN circuits fail fast without retry storms
+- After timeout expiration, the breaker enters HALF_OPEN
+- Successful probes close the circuit
+- Failed probes immediately reopen the circuit
+
+### Benefits
+
+- Prevents cascading failures
+- Reduces unnecessary retries
+- Improves recovery handling
+- Protects unstable providers
+
+---
+
+## 2.2 Fallback Routing
+
+When the primary provider fails:
+
+1. The circuit breaker opens
+2. Traffic automatically routes to the backup provider
+3. Users still receive responses
+4. Availability remains high
+
+If all providers fail:
+
+- The system returns a static fallback message
+- The gateway never crashes completely
+
+Example routes:
+
+```text
+primary:primary
+fallback:backup
+cache_hit:1.00
+static_fallback
+```
+
+---
+
+## 2.3 Cache System
+
+Two cache systems were implemented:
+
+| Cache Type | Description |
+|---|---|
+| ResponseCache | In-memory cache |
+| SharedRedisCache | Redis-based shared cache |
+
+### Cache Features
+
+- TTL expiration
+- Similarity-based lookup
+- Exact match lookup
+- False-hit detection
+- Privacy guardrails
+
+### Privacy Protection
+
+Sensitive queries are never cached.
+
+Examples:
+
+```text
+balance
+password
+account
+credit card
+user IDs
+```
+
+### False-Hit Protection
+
+The cache prevents incorrect matches between queries containing different years.
+
+Example:
+
+```text
+refund policy 2024
+refund policy 2026
+```
+
+These queries should NOT match.
+
+---
+
+# 3. Configuration
 
 | Setting | Value | Reason |
 |---|---:|---|
-| failure_threshold | 3 | Detect failures quickly without opening the circuit too aggressively |
-| reset_timeout_seconds | 2.0 | Allows fast recovery checks during chaos testing |
-| success_threshold | 1 | One successful HALF_OPEN probe closes the circuit |
-| cache TTL | 300 | Balances freshness and cache hit efficiency |
-| similarity_threshold | 0.92 | Prevents false hits between date-sensitive queries |
-| cache backend | redis | Enables shared cache across multiple instances |
-| load_test requests | 100 | Provides enough traffic for reproducible metrics |
+| failure_threshold | 3 | Opens after repeated failures while avoiding overly sensitive triggering |
+| reset_timeout_seconds | 2.0 | Fast recovery checks during chaos testing |
+| success_threshold | 1 | Single successful HALF_OPEN probe closes the circuit |
+| cache TTL | 300 | Five-minute cache lifetime balances freshness and performance |
+| similarity_threshold | 0.92 | Prevents date-sensitive false cache hits |
+| cache backend | redis | Enables multi-instance shared cache |
+| load_test requests | 100 | Generates stable reproducible metrics |
 
 ---
 
-# 3. SLO Definitions
+# 4. SLO Definitions
 
-| SLI | SLO Target | Actual Value | Status |
+The following SLOs were defined to evaluate system reliability.
+
+| SLI | Target | Actual Value | Status |
 |---|---|---:|---|
 | Availability | >= 99% | 1.0 | PASS |
-| Latency P95 | < 2500 ms | 320.51 | PASS |
-| Fallback Success Rate | >= 95% | 1.0 | PASS |
+| Error Rate | < 5% | 0.0 | PASS |
+| P95 Latency | < 2500 ms | 320.51 | PASS |
 | Cache Hit Rate | >= 10% | 0.7775 | PASS |
 | Recovery Time | < 5000 ms | 2292.38 | PASS |
+| Fallback Success Rate | >= 95% | 1.0 | PASS |
 
 ---
 
-# 4. Metrics Summary
+# 5. Metrics Summary
+
+## Final Metrics
 
 | Metric | Value |
 |---|---:|
@@ -82,32 +235,125 @@ Gateway
 
 ---
 
-# 5. Cache Comparison
+## Metric Analysis
 
-| Metric | Without Cache | With Cache | Delta |
+### Availability
+
+The system maintained 100% availability during chaos testing.  
+Even when providers failed, fallback routing ensured continued service.
+
+### Latency
+
+P50 latency became extremely low because most requests were served directly from cache.
+
+P95 and P99 latency remained stable even during provider failures.
+
+### Cost Savings
+
+The cache significantly reduced provider usage cost.
+
+Estimated cost savings:
+
+```text
+0.311
+```
+
+This demonstrates the value of aggressive cache reuse.
+
+### Circuit Recovery
+
+The circuit breaker successfully recovered providers after failures.
+
+Average recovery time:
+
+```text
+2292.38 ms
+```
+
+---
+
+# 6. Cache Comparison
+
+## Without Cache vs With Cache
+
+| Metric | Without Cache | With Cache | Improvement |
 |---|---:|---:|---|
 | latency_p50_ms | 237.6 | 0.35 | -99.9% |
 | latency_p95_ms | 510.01 | 320.51 | -37.1% |
 | estimated_cost | 0.185782 | 0.041494 | -77.7% |
 | cache_hit_rate | 0.0 | 0.7775 | +0.7775 |
 
-The cache significantly reduced provider calls and improved response latency.  
-False-hit protection successfully prevented incorrect matches between queries with different years.
+---
+
+## Cache Analysis
+
+The cache dramatically improved:
+
+- Response speed
+- Cost efficiency
+- System scalability
+
+A high cache hit rate reduced repeated provider calls.
+
+False-hit protection prevented incorrect semantic matches between unrelated queries.
 
 ---
 
-# 6. Redis Shared Cache
+# 7. Redis Shared Cache
 
-The project uses `SharedRedisCache` to support multi-instance deployments.  
-Unlike in-memory cache, Redis allows multiple gateway instances to share the same cache state.
+## Why Shared Cache Matters
+
+In-memory cache only exists inside one process.
+
+This becomes a problem in distributed deployments because:
+
+- Each instance has isolated cache state
+- Duplicate provider calls increase cost
+- Cache hit consistency decreases
+
+Redis solves this by providing centralized shared cache storage.
+
+---
+
+## Redis Implementation
+
+The `SharedRedisCache` implementation supports:
+
+- Exact-match lookup
+- Similarity-based lookup
+- TTL expiration
+- Shared cache state
+- Privacy protection
+- False-hit detection
+
+Redis keys:
+
+```text
+rl:cache:<query_hash>
+```
+
+Stored fields:
+
+```text
+query
+response
+```
+
+---
 
 ## Shared Cache Evidence
+
+Two separate cache instances successfully reused the same Redis entry.
+
+Example:
 
 ```text
 peer.get(...) returned 'shared cache evidence response' with score 1.00
 ```
 
-## Redis CLI Output
+---
+
+## Redis CLI Verification
 
 ```bash
 docker compose exec redis redis-cli KEYS "rl:cache:*"
@@ -115,59 +361,182 @@ docker compose exec redis redis-cli KEYS "rl:cache:*"
 rl:cache:4918eb19ce89
 ```
 
-Benefits of shared Redis cache:
+---
 
-- Shared cache state across instances
-- Reduced repeated provider requests
-- Better horizontal scalability
-- Consistent cache hit behavior
+# 8. Chaos Testing
+
+Several chaos scenarios were implemented to validate reliability behavior.
 
 ---
 
-# 7. Chaos Scenarios
+## Scenario 1 — primary_timeout_100
 
-| Scenario | Expected Behavior | Observed Behavior | Result |
-|---|---|---|---|
-| primary_timeout_100 | Primary fails completely and backup serves traffic | Circuit opened and fallback routing worked correctly | PASS |
-| primary_flaky_50 | Circuit oscillates between OPEN and CLOSED | Backup provider handled unstable traffic successfully | PASS |
-| all_healthy | Low latency and stable provider routing | Requests completed successfully with low errors | PASS |
-| cache_stale_candidate | Prevent false cache hits on similar queries | Guardrails blocked incorrect cache matches | PASS |
+### Goal
+
+Force the primary provider to fail completely.
+
+### Expected Behavior
+
+- Circuit breaker opens
+- Requests route to backup provider
+- Availability remains high
+
+### Observed Result
+
+- Circuit opened correctly
+- Backup provider handled traffic successfully
+- System remained available
+
+### Result
+
+```text
+PASS
+```
 
 ---
 
-# 8. Failure Analysis
+## Scenario 2 — primary_flaky_50
 
-One remaining weakness is that the circuit breaker state is currently process-local.  
-In a distributed deployment, multiple gateway replicas may not share the same provider health state.
+### Goal
 
-Potential production improvements:
+Simulate unstable provider behavior.
 
-- Store circuit breaker state in Redis
+### Expected Behavior
+
+- Circuit oscillates between OPEN and CLOSED
+- Some requests fallback successfully
+
+### Observed Result
+
+- Circuit transitions worked correctly
+- Backup routing prevented downtime
+
+### Result
+
+```text
+PASS
+```
+
+---
+
+## Scenario 3 — all_healthy
+
+### Goal
+
+Measure baseline system behavior.
+
+### Expected Behavior
+
+- Stable provider routing
+- High cache hit rate
+- Low latency
+
+### Observed Result
+
+- Metrics remained stable
+- Latency stayed low
+- Cache performed well
+
+### Result
+
+```text
+PASS
+```
+
+---
+
+## Scenario 4 — cache_stale_candidate
+
+### Goal
+
+Test false-hit protection.
+
+### Expected Behavior
+
+- Similar but different queries should not match incorrectly
+
+### Observed Result
+
+- Guardrails prevented invalid cache matches
+- Privacy-sensitive queries bypassed cache
+
+### Result
+
+```text
+PASS
+```
+
+---
+
+# 9. Test Results
+
+## Pytest Result
+
+```bash
+11 passed, 1 xpassed, 1 warning in 2.02s
+```
+
+All required tests passed successfully.
+
+Redis shared cache tests also passed.
+
+---
+
+# 10. Failure Analysis
+
+One remaining weakness is that circuit breaker state is currently process-local.
+
+In distributed production deployments:
+
+- Different gateway replicas may disagree about provider health
+- Some instances may continue sending traffic to unhealthy providers
+
+Potential improvements:
+
+- Move circuit breaker state into Redis
+- Add distributed synchronization
 - Add provider-level rate limiting
-- Improve concurrency handling
-- Add async request execution
+- Add async concurrency handling
 
 ---
 
-# 9. Next Steps
+# 11. Future Improvements
 
-1. Add concurrent load testing using ThreadPoolExecutor
-2. Store circuit breaker state in Redis
-3. Add Prometheus monitoring metrics
-4. Implement distributed rate limiting
-5. Add cost-aware provider routing
+Future improvements for this project include:
+
+1. Concurrent load testing using ThreadPoolExecutor
+2. Distributed Redis-backed circuit breaker state
+3. Prometheus monitoring integration
+4. Cost-aware provider routing
+5. Async provider execution
+6. Dynamic provider prioritization
+7. Advanced semantic similarity models
+8. Request-level rate limiting
+9. Grafana monitoring dashboards
+10. Production-scale stress testing
 
 ---
 
-# 10. Conclusion
+# 12. Conclusion
 
-The reliability gateway successfully implemented:
+This project successfully implemented a production-style reliability layer for LLM gateways.
 
-- Circuit breaker protection
+Key achievements:
+
+- Circuit breaker implementation
 - Automatic fallback routing
 - Redis shared caching
-- Cache safety guardrails
-- Chaos testing scenarios
-- Latency and cost metrics
+- Cache safety protection
+- Chaos testing
+- Reliability metrics
+- Cost optimization
+- Recovery handling
 
-The system maintained 100% availability during testing while significantly reducing latency and estimated provider cost through caching.
+The final system achieved:
+
+- 100% availability
+- Strong fallback reliability
+- Low latency
+- Significant provider cost reduction
+
+The project demonstrates how reliability engineering techniques can improve production AI systems under unstable conditions.
