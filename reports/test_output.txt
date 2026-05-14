@@ -1,0 +1,16 @@
+Asus@LAPTOP-C4FHF919 MINGW64 /c/LabVinUni/2A202600218_NguyenTienDatphase2-track3-day10-reliability-agent-main/2A202600218_NguyenTienDatphase2-track3-day10-reliability-agent-main
+$ make test
+
+...........X                                                             [100%]
+
+============================== warnings summary ===============================
+
+.venv/Lib/site-packages/_pytest/cacheprovider.py:475
+  C:/LabVinUni/2A202600218_NguyenTienDatphase2-track3-day10-reliability-agent-main/.venv/Lib/site-packages/_pytest/cacheprovider.py:475:
+  PytestCacheWarning: could not create cache path
+  C:\LabVinUni\2A202600218_NguyenTienDatphase2-track3-day10-reliability-agent-main\.pytest_cache\v\cache\nodeids:
+  [WinError 183] Cannot create a file when that file already exists
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+11 passed, 1 xpassed, 1 warning in 2.02s
